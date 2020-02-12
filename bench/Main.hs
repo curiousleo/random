@@ -1,229 +1,229 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ExplicitForAll #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+
 module Main (main) where
 
+import Control.Monad
 import Data.Int
 import Data.Proxy
 import Data.Typeable
 import Data.Word
 import Foreign.C.Types
 import Gauge.Main
+import Numeric.Natural (Natural)
+import System.Random.SplitMix as SM
 
-import System.Random
+import System.Random.Monad
 
 main :: IO ()
 main = do
   let !sz = 100000
+      genLengths =
+        -- create 5000 small lengths that are needed for ShortByteString generation
+        runStateGen (mkStdGen 2020) $ \g -> replicateM 5000 (uniformRM (16 + 1, 16 + 7) g)
   defaultMain
-    [ bgroup "pure"
+    [ bgroup "baseline"
+      [ let !smGen = SM.mkSMGen 1337 in bench "nextWord32" $ nf (genMany SM.nextWord32 smGen) sz
+      , let !smGen = SM.mkSMGen 1337 in bench "nextWord64" $ nf (genMany SM.nextWord64 smGen) sz
+      , let !smGen = SM.mkSMGen 1337 in bench "nextInt" $ nf (genMany SM.nextInt smGen) sz
+      , let !smGen = SM.mkSMGen 1337 in bench "split" $ nf (genMany SM.splitSMGen smGen) sz
+      ]
+    , bgroup "pure"
       [ bgroup "random"
-        [ pureRandomBench (Proxy :: Proxy Float) sz
-        , pureRandomBench (Proxy :: Proxy Double) sz
-        , pureRandomBench (Proxy :: Proxy Integer) sz
-        , pureRandomBench (Proxy :: Proxy Word8) sz
-        , pureRandomBench (Proxy :: Proxy Word16) sz
-        , pureRandomBench (Proxy :: Proxy Word32) sz
-        , pureRandomBench (Proxy :: Proxy Word64) sz
-        , pureRandomBench (Proxy :: Proxy Word) sz
-        , pureRandomBench (Proxy :: Proxy Int8) sz
-        , pureRandomBench (Proxy :: Proxy Int16) sz
-        , pureRandomBench (Proxy :: Proxy Int32) sz
-        , pureRandomBench (Proxy :: Proxy Int64) sz
-        , pureRandomBench (Proxy :: Proxy Int) sz
-        , pureRandomBench (Proxy :: Proxy Char) sz
-        , pureRandomBench (Proxy :: Proxy Bool) sz
-        -- , pureRandomBench (Proxy :: Proxy CBool) sz
-        , pureRandomBench (Proxy :: Proxy CChar) sz
-        , pureRandomBench (Proxy :: Proxy CSChar) sz
-        , pureRandomBench (Proxy :: Proxy CUChar) sz
-        , pureRandomBench (Proxy :: Proxy CShort) sz
-        , pureRandomBench (Proxy :: Proxy CUShort) sz
-        , pureRandomBench (Proxy :: Proxy CInt) sz
-        , pureRandomBench (Proxy :: Proxy CUInt) sz
-        , pureRandomBench (Proxy :: Proxy CLong) sz
-        , pureRandomBench (Proxy :: Proxy CULong) sz
-        , pureRandomBench (Proxy :: Proxy CPtrdiff) sz
-        , pureRandomBench (Proxy :: Proxy CSize) sz
-        , pureRandomBench (Proxy :: Proxy CWchar) sz
-        , pureRandomBench (Proxy :: Proxy CSigAtomic) sz
-        , pureRandomBench (Proxy :: Proxy CLLong) sz
-        , pureRandomBench (Proxy :: Proxy CULLong) sz
-        , pureRandomBench (Proxy :: Proxy CIntPtr) sz
-        , pureRandomBench (Proxy :: Proxy CUIntPtr) sz
-        , pureRandomBench (Proxy :: Proxy CIntMax) sz
-        , pureRandomBench (Proxy :: Proxy CUIntMax) sz
+        [ pureRandomBench @Float sz
+        , pureRandomBench @Double sz
+        , pureRandomBench @Integer sz
         ]
-      , bgroup "randomR"
+      , bgroup "uniform"
+        [ pureUniformBench @Word8 sz
+        , pureUniformBench @Word16 sz
+        , pureUniformBench @Word32 sz
+        , pureUniformBench @Word64 sz
+        , pureUniformBench @Word sz
+        , pureUniformBench @Int8 sz
+        , pureUniformBench @Int16 sz
+        , pureUniformBench @Int32 sz
+        , pureUniformBench @Int64 sz
+        , pureUniformBench @Int sz
+        , pureUniformBench @Char sz
+        , pureUniformBench @Bool sz
+        , pureUniformBench @CBool sz
+        , pureUniformBench @CChar sz
+        , pureUniformBench @CSChar sz
+        , pureUniformBench @CUChar sz
+        , pureUniformBench @CShort sz
+        , pureUniformBench @CUShort sz
+        , pureUniformBench @CInt sz
+        , pureUniformBench @CUInt sz
+        , pureUniformBench @CLong sz
+        , pureUniformBench @CULong sz
+        , pureUniformBench @CPtrdiff sz
+        , pureUniformBench @CSize sz
+        , pureUniformBench @CWchar sz
+        , pureUniformBench @CSigAtomic sz
+        , pureUniformBench @CLLong sz
+        , pureUniformBench @CULLong sz
+        , pureUniformBench @CIntPtr sz
+        , pureUniformBench @CUIntPtr sz
+        , pureUniformBench @CIntMax sz
+        , pureUniformBench @CUIntMax sz
+        ]
+      , bgroup "uniformR"
         [ bgroup "full"
-          [ pureUniformRFullBench (Proxy :: Proxy Word8) sz
-          , pureUniformRFullBench (Proxy :: Proxy Word16) sz
-          , pureUniformRFullBench (Proxy :: Proxy Word32) sz
-          , pureUniformRFullBench (Proxy :: Proxy Word64) sz
-          , pureUniformRFullBench (Proxy :: Proxy Word) sz
-          , pureUniformRFullBench (Proxy :: Proxy Int8) sz
-          , pureUniformRFullBench (Proxy :: Proxy Int16) sz
-          , pureUniformRFullBench (Proxy :: Proxy Int32) sz
-          , pureUniformRFullBench (Proxy :: Proxy Int64) sz
-          , pureUniformRFullBench (Proxy :: Proxy Int) sz
-          , pureUniformRFullBench (Proxy :: Proxy Char) sz
-          , pureUniformRFullBench (Proxy :: Proxy Bool) sz
-          -- , pureUniformRFullBench (Proxy :: Proxy CBool) sz
-          , pureUniformRFullBench (Proxy :: Proxy CChar) sz
-          , pureUniformRFullBench (Proxy :: Proxy CSChar) sz
-          , pureUniformRFullBench (Proxy :: Proxy CUChar) sz
-          , pureUniformRFullBench (Proxy :: Proxy CShort) sz
-          , pureUniformRFullBench (Proxy :: Proxy CUShort) sz
-          , pureUniformRFullBench (Proxy :: Proxy CInt) sz
-          , pureUniformRFullBench (Proxy :: Proxy CUInt) sz
-          , pureUniformRFullBench (Proxy :: Proxy CLong) sz
-          , pureUniformRFullBench (Proxy :: Proxy CULong) sz
-          , pureUniformRFullBench (Proxy :: Proxy CPtrdiff) sz
-          , pureUniformRFullBench (Proxy :: Proxy CSize) sz
-          , pureUniformRFullBench (Proxy :: Proxy CWchar) sz
-          , pureUniformRFullBench (Proxy :: Proxy CSigAtomic) sz
-          , pureUniformRFullBench (Proxy :: Proxy CLLong) sz
-          , pureUniformRFullBench (Proxy :: Proxy CULLong) sz
-          , pureUniformRFullBench (Proxy :: Proxy CIntPtr) sz
-          , pureUniformRFullBench (Proxy :: Proxy CUIntPtr) sz
-          , pureUniformRFullBench (Proxy :: Proxy CIntMax) sz
-          , pureUniformRFullBench (Proxy :: Proxy CUIntMax) sz
+          [ pureUniformRFullBench @Word8 sz
+          , pureUniformRFullBench @Word16 sz
+          , pureUniformRFullBench @Word32 sz
+          , pureUniformRFullBench @Word64 sz
+          , pureUniformRFullBench @Word sz
+          , pureUniformRFullBench @Int8 sz
+          , pureUniformRFullBench @Int16 sz
+          , pureUniformRFullBench @Int32 sz
+          , pureUniformRFullBench @Int64 sz
+          , pureUniformRFullBench @Int sz
+          , pureUniformRFullBench @Char sz
+          , pureUniformRFullBench @Bool sz
+          , pureUniformRFullBench @CBool sz
+          , pureUniformRFullBench @CChar sz
+          , pureUniformRFullBench @CSChar sz
+          , pureUniformRFullBench @CUChar sz
+          , pureUniformRFullBench @CShort sz
+          , pureUniformRFullBench @CUShort sz
+          , pureUniformRFullBench @CInt sz
+          , pureUniformRFullBench @CUInt sz
+          , pureUniformRFullBench @CLong sz
+          , pureUniformRFullBench @CULong sz
+          , pureUniformRFullBench @CPtrdiff sz
+          , pureUniformRFullBench @CSize sz
+          , pureUniformRFullBench @CWchar sz
+          , pureUniformRFullBench @CSigAtomic sz
+          , pureUniformRFullBench @CLLong sz
+          , pureUniformRFullBench @CULLong sz
+          , pureUniformRFullBench @CIntPtr sz
+          , pureUniformRFullBench @CUIntPtr sz
+          , pureUniformRFullBench @CIntMax sz
+          , pureUniformRFullBench @CUIntMax sz
           ]
         , bgroup "excludeMax"
-          [ pureUniformRExcludeMaxBench (Proxy :: Proxy Word8) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Word16) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Word32) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Word64) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Word) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Int8) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Int16) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Int32) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Int64) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Int) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Char) sz
-          -- , pureUniformRExcludeMaxBench (Proxy :: Proxy CBool) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy Bool) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CChar) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CSChar) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CUChar) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CShort) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CUShort) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CInt) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CUInt) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CLong) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CULong) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CPtrdiff) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CSize) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CWchar) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CSigAtomic) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CLLong) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CULLong) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CIntPtr) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CUIntPtr) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CIntMax) sz
-          , pureUniformRExcludeMaxBench (Proxy :: Proxy CUIntMax) sz
+          [ pureUniformRExcludeMaxBench @Word8 sz
+          , pureUniformRExcludeMaxBench @Word16 sz
+          , pureUniformRExcludeMaxBench @Word32 sz
+          , pureUniformRExcludeMaxBench @Word64 sz
+          , pureUniformRExcludeMaxBench @Word sz
+          , pureUniformRExcludeMaxBench @Int8 sz
+          , pureUniformRExcludeMaxBench @Int16 sz
+          , pureUniformRExcludeMaxBench @Int32 sz
+          , pureUniformRExcludeMaxBench @Int64 sz
+          , pureUniformRExcludeMaxBench @Int sz
+          , pureUniformRExcludeMaxEnumBench @Char sz
+          , pureUniformRExcludeMaxEnumBench @Bool sz
+          , pureUniformRExcludeMaxBench @CBool sz
+          , pureUniformRExcludeMaxBench @CChar sz
+          , pureUniformRExcludeMaxBench @CSChar sz
+          , pureUniformRExcludeMaxBench @CUChar sz
+          , pureUniformRExcludeMaxBench @CShort sz
+          , pureUniformRExcludeMaxBench @CUShort sz
+          , pureUniformRExcludeMaxBench @CInt sz
+          , pureUniformRExcludeMaxBench @CUInt sz
+          , pureUniformRExcludeMaxBench @CLong sz
+          , pureUniformRExcludeMaxBench @CULong sz
+          , pureUniformRExcludeMaxBench @CPtrdiff sz
+          , pureUniformRExcludeMaxBench @CSize sz
+          , pureUniformRExcludeMaxBench @CWchar sz
+          , pureUniformRExcludeMaxBench @CSigAtomic sz
+          , pureUniformRExcludeMaxBench @CLLong sz
+          , pureUniformRExcludeMaxBench @CULLong sz
+          , pureUniformRExcludeMaxBench @CIntPtr sz
+          , pureUniformRExcludeMaxBench @CUIntPtr sz
+          , pureUniformRExcludeMaxBench @CIntMax sz
+          , pureUniformRExcludeMaxBench @CUIntMax sz
           ]
         , bgroup "includeHalf"
-          [ pureUniformRIncludeHalfBench (Proxy :: Proxy Word8) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy Word16) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy Word32) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy Word64) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy Word) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy Int8) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy Int16) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy Int32) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy Int64) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy Int) sz
-          , pureUniformRIncludeHalfEnumBench (Proxy :: Proxy Char) sz
-          -- , pureUniformRIncludeHalfEnumBench (Proxy :: Proxy CBool) sz
-          , pureUniformRIncludeHalfEnumBench (Proxy :: Proxy Bool) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CChar) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CSChar) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CUChar) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CShort) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CUShort) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CInt) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CUInt) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CLong) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CULong) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CPtrdiff) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CSize) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CWchar) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CSigAtomic) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CLLong) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CULLong) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CIntPtr) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CUIntPtr) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CIntMax) sz
-          , pureUniformRIncludeHalfBench (Proxy :: Proxy CUIntMax) sz
+          [ pureUniformRIncludeHalfBench @Word8 sz
+          , pureUniformRIncludeHalfBench @Word16 sz
+          , pureUniformRIncludeHalfBench @Word32 sz
+          , pureUniformRIncludeHalfBench @Word64 sz
+          , pureUniformRIncludeHalfBench @Word sz
+          , pureUniformRIncludeHalfBench @Int8 sz
+          , pureUniformRIncludeHalfBench @Int16 sz
+          , pureUniformRIncludeHalfBench @Int32 sz
+          , pureUniformRIncludeHalfBench @Int64 sz
+          , pureUniformRIncludeHalfBench @Int sz
+          , pureUniformRIncludeHalfEnumBench @Char sz
+          , pureUniformRIncludeHalfEnumBench @Bool sz
+          , pureUniformRIncludeHalfBench @CBool sz
+          , pureUniformRIncludeHalfBench @CChar sz
+          , pureUniformRIncludeHalfBench @CSChar sz
+          , pureUniformRIncludeHalfBench @CUChar sz
+          , pureUniformRIncludeHalfBench @CShort sz
+          , pureUniformRIncludeHalfBench @CUShort sz
+          , pureUniformRIncludeHalfBench @CInt sz
+          , pureUniformRIncludeHalfBench @CUInt sz
+          , pureUniformRIncludeHalfBench @CLong sz
+          , pureUniformRIncludeHalfBench @CULong sz
+          , pureUniformRIncludeHalfBench @CPtrdiff sz
+          , pureUniformRIncludeHalfBench @CSize sz
+          , pureUniformRIncludeHalfBench @CWchar sz
+          , pureUniformRIncludeHalfBench @CSigAtomic sz
+          , pureUniformRIncludeHalfBench @CLLong sz
+          , pureUniformRIncludeHalfBench @CULLong sz
+          , pureUniformRIncludeHalfBench @CIntPtr sz
+          , pureUniformRIncludeHalfBench @CUIntPtr sz
+          , pureUniformRIncludeHalfBench @CIntMax sz
+          , pureUniformRIncludeHalfBench @CUIntMax sz
           ]
         , bgroup "unbounded"
-          [ pureUniformRBench (Proxy :: Proxy Float) (1.23e-4, 5.67e8) sz
-          , pureUniformRBench (Proxy :: Proxy Double) (1.23e-4, 5.67e8) sz
+          [ pureUniformRBench @Float (1.23e-4, 5.67e8) sz
+          , pureUniformRBench @Double (1.23e-4, 5.67e8) sz
           , let !i = (10 :: Integer) ^ (100 :: Integer)
                 !range = (-i - 1, i + 1)
-            in pureUniformRBench (Proxy :: Proxy Integer) range sz
-          -- , let !n = (10 :: Natural) ^ (100 :: Natural)
-          --       !range = (1, n - 1)
-          --   in pureUniformRBench (Proxy :: Proxy Natural) range sz
+            in pureUniformRBench @Integer range sz
+          , let !n = (10 :: Natural) ^ (100 :: Natural)
+                !range = (1, n - 1)
+            in pureUniformRBench @Natural range sz
+          ]
+        , bgroup "ShortByteString"
+          [ env (pure genLengths) $ \ ~(ns, gen) ->
+              bench "genShortByteString" $
+              nfIO $ runStateGenT_ gen $ \g -> mapM (`uniformShortByteString` g) ns
           ]
         ]
       ]
     ]
 
-pureRandomBench :: forall a. (Typeable a, Random a) => Proxy a -> Int -> Benchmark
-pureRandomBench px =
+pureRandomBench :: forall a. (Typeable a, Random a) => Int -> Benchmark
+pureRandomBench = let !stdGen = mkStdGen 1337 in pureBench @a (genMany (random @a) stdGen)
+
+pureUniformBench :: forall a. (Typeable a, Uniform a) => Int -> Benchmark
+pureUniformBench = let !stdGen = mkStdGen 1337 in pureBench @a (genMany (uniform @_ @a) stdGen)
+
+pureUniformRFullBench :: forall a. (Typeable a, UniformRange a, Bounded a) => Int -> Benchmark
+pureUniformRFullBench = let !range = (minBound @a, maxBound @a) in pureUniformRBench range
+
+pureUniformRExcludeMaxBench :: forall a. (Typeable a, UniformRange a, Bounded a, Num a) => Int -> Benchmark
+pureUniformRExcludeMaxBench = let !range = (minBound @a, maxBound @a - 1) in pureUniformRBench range
+
+pureUniformRExcludeMaxEnumBench :: forall a. (Typeable a, UniformRange a, Bounded a, Enum a) => Int -> Benchmark
+pureUniformRExcludeMaxEnumBench = let !range = (minBound @a, pred (maxBound @a)) in pureUniformRBench range
+
+pureUniformRIncludeHalfBench :: forall a. (Typeable a, UniformRange a, Bounded a, Integral a) => Int -> Benchmark
+pureUniformRIncludeHalfBench = let !range = (minBound @a, (maxBound @a `div` 2) + 1) in pureUniformRBench range
+
+pureUniformRIncludeHalfEnumBench :: forall a. (Typeable a, UniformRange a, Bounded a, Enum a) => Int -> Benchmark
+pureUniformRIncludeHalfEnumBench =
+  let !range = (succ (minBound @a), toEnum ((fromEnum (maxBound @a) `div` 2) + 1))
+  in pureUniformRBench range
+
+pureUniformRBench :: forall a. (Typeable a, UniformRange a) => (a, a) -> Int -> Benchmark
+pureUniformRBench range =
   let !stdGen = mkStdGen 1337
-   in pureBench px (genMany (random :: StdGen -> (a, StdGen)) stdGen)
+  in pureBench @a (genMany (uniformR range) stdGen)
 
-pureUniformRFullBench ::
-     forall a. (Typeable a, Random a, Bounded a)
-  => Proxy a
-  -> Int
-  -> Benchmark
-pureUniformRFullBench px =
-  let range = (minBound :: a, maxBound :: a)
-   in pureUniformRBench px range
-
-pureUniformRExcludeMaxBench ::
-     forall a. (Typeable a, Random a, Bounded a, Enum a)
-  => Proxy a
-  -> Int
-  -> Benchmark
-pureUniformRExcludeMaxBench px =
-  let range = (minBound :: a, pred (maxBound :: a))
-   in pureUniformRBench px range
-
-pureUniformRIncludeHalfBench ::
-     forall a. (Typeable a, Random a, Bounded a, Integral a)
-  => Proxy a
-  -> Int
-  -> Benchmark
-pureUniformRIncludeHalfBench px =
-  let range = ((minBound :: a) + 1, ((maxBound :: a) `div` 2) + 1)
-  in pureUniformRBench px range
-
-pureUniformRIncludeHalfEnumBench ::
-     forall a. (Typeable a, Random a, Bounded a, Enum a)
-  => Proxy a
-  -> Int
-  -> Benchmark
-pureUniformRIncludeHalfEnumBench px =
-  let range = (succ (minBound :: a), toEnum ((fromEnum (maxBound :: a) `div` 2) + 1))
-  in pureUniformRBench px range
-
-pureUniformRBench ::
-     forall a. (Typeable a, Random a)
-  => Proxy a
-  -> (a, a)
-  -> Int
-  -> Benchmark
-pureUniformRBench px range@(!_, !_) =
-  let !stdGen = mkStdGen 1337
-  in pureBench px (genMany (randomR range) stdGen)
-
-pureBench :: forall a. (Typeable a) => Proxy a -> (Int -> ()) -> Int -> Benchmark
-pureBench px f sz = bench (showsTypeRep (typeRep px) "") $ nf f sz
+pureBench :: forall a. (Typeable a) => (Int -> ()) -> Int -> Benchmark
+pureBench f sz = bench (showsTypeRep (typeRep (Proxy :: Proxy a)) "") $ nf f sz
 
 genMany :: (g -> (a, g)) -> g -> Int -> ()
 genMany f g0 n = go g0 0
