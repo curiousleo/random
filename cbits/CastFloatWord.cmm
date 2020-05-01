@@ -29,6 +29,21 @@ stg_word64ToDoubleyg(I64 w)
     return (d);
 }
 
+stg_doubleToWord64zh(D_ d)
+{
+    I64 w;
+    P_ ptr;
+
+    STK_CHK_GEN_N (DOUBLE_SIZE_WDS);
+
+    reserve DOUBLE_SIZE_WDS = ptr {
+        D_[ptr] = d;
+        w = I64[ptr];
+    }
+
+    return (w);
+}
+
 stg_word32ToFloatyg(W_ w)
 {
     F_ f;
@@ -42,5 +57,21 @@ stg_word32ToFloatyg(W_ w)
     }
 
     return (f);
+}
+
+stg_floatToWord32zh(F_ f)
+{
+    W_ w;
+    P_ ptr;
+
+    STK_CHK_GEN_N (1);
+
+    reserve 1 = ptr {
+        F_[ptr] = f;
+        // Fix #16617: use zero-extending (TO_ZXW_) here
+        w = TO_ZXW_(I32[ptr]);
+    }
+
+    return (w);
 }
 

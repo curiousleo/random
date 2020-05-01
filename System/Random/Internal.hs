@@ -26,6 +26,7 @@
 --
 -- This library deals with the common task of pseudo-random number generation.
 module System.Random.Internal
+{-
   (-- * Pure and monadic pseudo-random number generator interfaces
     RandomGen(..)
   , MonadRandom(..)
@@ -50,12 +51,13 @@ module System.Random.Internal
   , UniformRange(..)
   , uniformByteString
   , floatInUnitIntervalM
+  , floatInIntervalM
   , doubleInUnitIntervalM
 
   -- * Generators for sequences of pseudo-random bytes
   , genShortByteStringIO
   , genShortByteStringST
-  ) where
+  ) -} where
 
 import Control.Arrow
 import Control.Monad.IO.Class
@@ -679,6 +681,15 @@ castWord32ToFloat (W32# w#) = F# (stgWord32ToFloat w#)
 foreign import prim "stg_word32ToFloatyg"
     stgWord32ToFloat :: Word# -> Float#
 
+
+{-# INLINE castFloatToWord32 #-}
+castFloatToWord32 :: Float -> Word32
+castFloatToWord32 (F# f#) = W32# (stgFloatToWord32 f#)
+
+foreign import prim "stg_floatToWord32zh"
+    stgFloatToWord32 :: Float# -> Word#
+
+
 {-# INLINE castWord64ToDouble #-}
 castWord64ToDouble :: Word64 -> Double
 castWord64ToDouble (W64# w) = D# (stgWord64ToDouble w)
@@ -691,9 +702,10 @@ foreign import prim "stg_word64ToDoubleyg"
 #endif
 
 instance UniformRange Float where
-  uniformRM (l, h) g = do
-    x <- floatInUnitIntervalM g
-    return $ (h - l) * x + l
+  uniformRM (l, h) g = floatInIntervalM g l h
+  --uniformRM (l, h) g = do
+  --  x <- floatInUnitIntervalM g
+  --  return $ (h - l) * x + l
   {-# INLINE uniformRM #-}
 
 -- | Counts the number of failed Bernoulli trials with p=0.5 before the first
@@ -710,25 +722,21 @@ geometricDistr start limit g = go start
             else go (acc + finiteBitSize w)
 {-# INLINE geometricDistr #-}
 
--- | Generates a 'Word64' representing a floating point number in [0,1] using
--- Downey's method: http://allendowney.com/research/rand/
+-- | Generates a 'Word64' representing a floating point number in [0,2^e) using
+-- a variant of Downey's method: http://allendowney.com/research/rand/ without carry
 floatingPointInUnitIntervalM :: MonadRandom g s m => Int -> Int -> g s -> m Word64
 floatingPointInUnitIntervalM maxExp mantissaBits g = do
   let entropyBits = 64 -- bit size of the word generated initially
-  let carryMask = 2 ^ mantissaBits
+  let bernoulliBits = entropyBits - mantissaBits
   let mantissaMask = (2 ^ mantissaBits) - 1
 
   w <- uniformWord64 g
   let m = w .&. mantissaMask
-  let (carry, bernoulliBits) =
-        if m /= 0
-          then (0, entropyBits - mantissaBits)
-          else (((w .&. carryMask) `unsafeShiftR` mantissaBits), entropyBits - mantissaBits - 1)
 
   d <- case countLeadingZeros w of
     b | b < bernoulliBits -> return b
     _ -> geometricDistr bernoulliBits maxExp g
-  let e = fromIntegral (maxExp - d) + carry
+  let e = fromIntegral (maxExp - d)
 
   return $ (e `unsafeShiftL` mantissaBits) .|. m
 {-# INLINE floatingPointInUnitIntervalM #-}
@@ -737,6 +745,80 @@ floatingPointInUnitIntervalM maxExp mantissaBits g = do
 floatInUnitIntervalM :: MonadRandom g s m => g s -> m Float
 floatInUnitIntervalM g = (castWord32ToFloat . fromIntegral) <$> floatingPointInUnitIntervalM 126 23 g
 {-# INLINE floatInUnitIntervalM #-}
+
+floatInExpIntervalM :: MonadRandom g s m => g s -> Int -> m Float
+floatInExpIntervalM g e = (castWord32ToFloat . fromIntegral) <$> floatingPointInUnitIntervalM (127 + e) 23 g
+
+-- [0, 2^e)
+floatInBiasedExponentIntervalM :: MonadRandom g s m => g s -> Word32 -> m Float
+floatInBiasedExponentIntervalM g e = (castWord32ToFloat . fromIntegral) <$> floatingPointInUnitIntervalM (fromIntegral e) 23 g
+
+nextPowerOfTwoExponent :: Float -> Int
+nextPowerOfTwoExponent f
+  | isInfinite f || isNaN f || m == 0 = e
+  | otherwise = e + 1
+  where
+    mantissaBits = 23
+    exponentBits = 8
+    mantissaMask = (2 ^ mantissaBits) - 1
+    exponentMask = (2 ^ exponentBits) - 1
+
+    w = castFloatToWord32 f
+    m = w .&. mantissaMask
+    e = (fromIntegral $ (w `unsafeShiftR` mantissaBits) .&. exponentMask) - 127
+
+encodeExponent :: Int -> Float
+encodeExponent e = castWord32ToFloat $ (fromIntegral (e + 127)) `unsafeShiftL` mantissaBits
+  where mantissaBits = 23
+
+nextPowerOfTwo :: Float -> Float
+nextPowerOfTwo = encodeExponent . nextPowerOfTwoExponent
+
+floatInIntervalFromZero :: MonadRandom g s m => g s -> Float -> m Float
+floatInIntervalFromZero g b
+  | b < 0 = error "only works for positive floats"
+  | b == 0 = return 0
+  | otherwise = do
+      x <- floatInUnitIntervalM g
+      let u = x * nextPowerOfTwo b
+      if u <= b then return u else floatInIntervalFromZero g b
+
+-- PRECONDITIONS:
+-- a <= b
+-- 0 <= b
+floatInIntervalM' :: MonadRandom g s m => g s -> Float -> Float -> m Float
+floatInIntervalM' g a b
+
+-- TODO: a = 0, b = -0
+-- TODO: what about inf?
+floatInIntervalM :: MonadRandom g s m => g s -> Float -> Float -> m Float
+floatInIntervalM g a b
+  | a > b = floatInIntervalM g b a
+  -- INVARIANT: a <= b
+  | b < 0 || isNegativeZero b = negate <$> (floatInIntervalM g (-b) (-a)) -- guard can't be 'b <= 0' since that would lead to infinite loop
+  -- INVARIANT: a <= b && 0 <= b && !isNegativeZero b
+  | a == negate b = do -- TODO: take special care with -0!; right now this case is just an optimisation.
+      s <- uniformM g
+      u <- floatInIntervalFromZero g b
+      return $ if s then u else -u
+  | a < 0 && 0 /= b = do
+      -- INVARIANT: a < b && 0 < b
+      let xExp = nextPowerOfTwoExponent a
+          yExp = nextPowerOfTwoExponent b
+          x = encodeExponent xExp
+          y = encodeExponent yExp
+      d <- floatInIntervalM g 0 (x + y)
+      u <- if d <= x -- True with p = x / (x + y)
+             then negate <$> floatInExpIntervalM g xExp
+             else floatInExpIntervalM g yExp
+      if a <= u && u <= b then return u else floatInIntervalM g a b
+  -- INVARIANT: a <= b && 0 <= b && !isNegativeZero b && (0 <= a || b == 0)
+  -- INVARIANT: 0 <= a <= b || a <= b = 0
+  | otherwise = do
+      let d = b - a -- TODO: upward rounding!
+      v <- floatInIntervalFromZero g d
+      let u = v + a -- TODO: round towards zero
+      if a <= u && u <= b then return u else floatInIntervalM g a b
 
 -- | Generates a 'Double' in [0,1].
 doubleInUnitIntervalM :: MonadRandom g s m => g s -> m Double
