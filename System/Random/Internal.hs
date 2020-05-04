@@ -725,7 +725,7 @@ geometricDistr start limit g = go start
 -- | Generates a 'Word64' representing a floating point number in [0,2^e) using
 -- a variant of Downey's method: http://allendowney.com/research/rand/ without carry
 floatingPointInUnitIntervalM :: MonadRandom g s m => Int -> Int -> g s -> m Word64
-floatingPointInUnitIntervalM maxExp mantissaBits g = do
+floatingPointInUnitIntervalM rawMaxExp mantissaBits g = do
   let entropyBits = 64 -- bit size of the word generated initially
   let bernoulliBits = entropyBits - mantissaBits
   let mantissaMask = (2 ^ mantissaBits) - 1
@@ -735,24 +735,48 @@ floatingPointInUnitIntervalM maxExp mantissaBits g = do
 
   d <- case countLeadingZeros w of
     b | b < bernoulliBits -> return b
-    _ -> geometricDistr bernoulliBits maxExp g
-  let e = fromIntegral (maxExp - d)
+    _ -> geometricDistr bernoulliBits rawMaxExp g
+  let e = fromIntegral (rawMaxExp - d)
 
   return $ (e `unsafeShiftL` mantissaBits) .|. m
 {-# INLINE floatingPointInUnitIntervalM #-}
 
--- | Generates a 'Float' in [0,1].
+-- | Generates a 'Float' in [0,1).
 floatInUnitIntervalM :: MonadRandom g s m => g s -> m Float
-floatInUnitIntervalM g = (castWord32ToFloat . fromIntegral) <$> floatingPointInUnitIntervalM 126 23 g
+floatInUnitIntervalM = flip floatInExpIntervalM 0
 {-# INLINE floatInUnitIntervalM #-}
 
+-- | Generates a 'Float' in [0,2^e).
 floatInExpIntervalM :: MonadRandom g s m => g s -> Int -> m Float
-floatInExpIntervalM g e = (castWord32ToFloat . fromIntegral) <$> floatingPointInUnitIntervalM (127 + e) 23 g
+floatInExpIntervalM g e = (castWord32ToFloat . fromIntegral) <$> floatingPointInUnitIntervalM (126 + e) 23 g
+{-# INLINE floatInExpIntervalM #-}
 
--- [0, 2^e)
-floatInBiasedExponentIntervalM :: MonadRandom g s m => g s -> Word32 -> m Float
-floatInBiasedExponentIntervalM g e = (castWord32ToFloat . fromIntegral) <$> floatingPointInUnitIntervalM (fromIntegral e) 23 g
-
+-- | Finds the next larger power-of-two exponent.
+--
+-- The smallest possible exponent is -127:
+-- >>> nextPowerOfTwoExponent 0
+-- -127
+-- >>> :{
+-- let twoToMinusThirty = 1 / (fromIntegral $ (2 :: Integer) ^ (30 :: Integer)) :: Float
+--     twoToMinusTwenty = 1 / (fromIntegral $ (2 :: Integer) ^ (20 :: Integer)) :: Float
+--     e1 = nextPowerOfTwoExponent $ twoToMinusThirty
+--     e2 = nextPowerOfTwoExponent $ twoToMinusTwenty
+--     e3 = nextPowerOfTwoExponent $ twoToMinusTwenty + twoToMinusThirty
+--     e4 = nextPowerOfTwoExponent $ twoToMinusTwenty - twoToMinusThirty
+-- in  (e1, e2, e3, e4)
+-- (-30, -20, -19, -20)
+--
+-- For 
+-- >>> nextPowerOfTwoExponent 1
+-- 0
+-- >>> nextPowerOfTwoExponent 1.1
+-- 1
+-- >>> nextPowerOfTwoExponent $ fromIntegral $ (2 :: Integer) ^ (100 :: Integer)
+-- 100
+-- >>> nextPowerOfTwoExponent $ 1 + (fromIntegral $ (2 :: Integer) ^ (100 :: Integer))
+-- 101
+-- >>> nextPowerOfTwoExponent $ 1 + (fromIntegral $ (2 :: Integer) ^ (100 :: Integer))
+-- 101
 nextPowerOfTwoExponent :: Float -> Int
 nextPowerOfTwoExponent f
   | isInfinite f || isNaN f || m == 0 = e
@@ -786,8 +810,8 @@ floatInIntervalFromZero g b
 -- PRECONDITIONS:
 -- a <= b
 -- 0 <= b
-floatInIntervalM' :: MonadRandom g s m => g s -> Float -> Float -> m Float
-floatInIntervalM' g a b
+--floatInIntervalM' :: MonadRandom g s m => g s -> Float -> Float -> m Float
+--floatInIntervalM' g a b
 
 -- TODO: a = 0, b = -0
 -- TODO: what about inf?
@@ -807,7 +831,7 @@ floatInIntervalM g a b
           yExp = nextPowerOfTwoExponent b
           x = encodeExponent xExp
           y = encodeExponent yExp
-      d <- floatInIntervalM g 0 (x + y)
+      d <- floatInIntervalFromZero g (x + y)
       u <- if d <= x -- True with p = x / (x + y)
              then negate <$> floatInExpIntervalM g xExp
              else floatInExpIntervalM g yExp
