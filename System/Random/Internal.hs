@@ -754,9 +754,9 @@ floatInExpIntervalM g e = (castWord32ToFloat . fromIntegral) <$> floatingPointIn
 -- | Finds the next larger power-of-two exponent.
 --
 -- The smallest possible exponent is -127:
--- >>> nextPowerOfTwoExponent 0
+-- >> nextPowerOfTwoExponent 0
 -- -127
--- >>> :{
+-- >> :{
 -- let twoToMinusThirty = 1 / (fromIntegral $ (2 :: Integer) ^ (30 :: Integer)) :: Float
 --     twoToMinusTwenty = 1 / (fromIntegral $ (2 :: Integer) ^ (20 :: Integer)) :: Float
 --     e1 = nextPowerOfTwoExponent $ twoToMinusThirty
@@ -767,15 +767,15 @@ floatInExpIntervalM g e = (castWord32ToFloat . fromIntegral) <$> floatingPointIn
 -- (-30, -20, -19, -20)
 --
 -- For 
--- >>> nextPowerOfTwoExponent 1
+-- >> nextPowerOfTwoExponent 1
 -- 0
--- >>> nextPowerOfTwoExponent 1.1
+-- >> nextPowerOfTwoExponent 1.1
 -- 1
--- >>> nextPowerOfTwoExponent $ fromIntegral $ (2 :: Integer) ^ (100 :: Integer)
+-- >> nextPowerOfTwoExponent $ fromIntegral $ (2 :: Integer) ^ (100 :: Integer)
 -- 100
--- >>> nextPowerOfTwoExponent $ 1 + (fromIntegral $ (2 :: Integer) ^ (100 :: Integer))
+-- >> nextPowerOfTwoExponent $ 1 + (fromIntegral $ (2 :: Integer) ^ (100 :: Integer))
 -- 101
--- >>> nextPowerOfTwoExponent $ 1 + (fromIntegral $ (2 :: Integer) ^ (100 :: Integer))
+-- >> nextPowerOfTwoExponent $ 1 + (fromIntegral $ (2 :: Integer) ^ (100 :: Integer))
 -- 101
 nextPowerOfTwoExponent :: Float -> Int
 nextPowerOfTwoExponent f
