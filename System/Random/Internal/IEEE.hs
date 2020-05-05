@@ -9,7 +9,11 @@
 
 #include "MachDeps.h"
 
-module System.Random.Internal.IEEE where
+module System.Random.Internal.IEEE
+  ( IEEERepr(..)
+  , uniformUpToPowerOfTwo
+  , uniformInRange
+  ) where
 
 import Data.Proxy
 import Data.Word
@@ -33,20 +37,32 @@ class (RealFloat a, Bits (Repr a), Integral (Repr a), Num (Repr a)) => IEEERepr 
 instance IEEERepr Float where
   type Repr Float = Word32
   fromRepr = castWord32ToFloat
+  {-# INLINE fromRepr #-}
   toRepr = castFloatToWord32
+  {-# INLINE toRepr #-}
   infinity _ = 1/0
+  {-# INLINE infinity #-}
   mantissaWidth _ = 23
+  {-# INLINE mantissaWidth #-}
   exponentWidth _ = 8
+  {-# INLINE exponentWidth #-}
   exponentBias _ = 127
+  {-# INLINE exponentBias #-}
 
 instance IEEERepr Double where
   type Repr Double = Word64
   fromRepr = castWord64ToDouble
+  {-# INLINE fromRepr #-}
   toRepr = castDoubleToWord64
+  {-# INLINE toRepr #-}
   infinity _ = 1/0
+  {-# INLINE infinity #-}
   mantissaWidth _ = 52
+  {-# INLINE mantissaWidth #-}
   exponentWidth _ = 11
+  {-# INLINE exponentWidth #-}
   exponentBias _ = 1023
+  {-# INLINE exponentBias #-}
 
 decode :: forall a. IEEERepr a => a -> (Bool, Int, Repr a)
 decode f = (sign, expo, mant)
@@ -59,6 +75,7 @@ decode f = (sign, expo, mant)
     sign = (r `unsafeShiftR` (mantW + expoW)) .&. 1 /= 0
     expo = fromIntegral $ (r `unsafeShiftR` mantW) .&. (mask expoW)
     mant = r .&. (mask mantW)
+{-# INLINE decode #-}
 
 encode :: forall a. IEEERepr a => (Bool, Int, Repr a) -> a
 encode (sign, expo, mant) = fromRepr r
@@ -71,15 +88,19 @@ encode (sign, expo, mant) = fromRepr r
     e = fromIntegral expo .&. mask expoW
     m = mant .&. mask mantW
     r = (s `unsafeShiftL` (mantW + expoW)) .|. (e `unsafeShiftL` mantW) .|. m
+{-# INLINE encode #-}
 
 mask :: (Bits a, Num a) => Int -> a
 mask width = (1 `unsafeShiftL` width) - 1
+{-# INLINE mask #-}
 
 isNegative :: IEEERepr a => a -> Bool
 isNegative f = let (sign, _expo, _mant) = decode f in sign
+{-# INLINE isNegative #-}
 
 encodePowerOfTwo :: IEEERepr a => Int -> a
 encodePowerOfTwo expo = encode (False, expo, 0)
+{-# INLINE encodePowerOfTwo #-}
 
 -------------------------------------------------------------------------------
 -- IEEE floating point number generation
@@ -122,6 +143,7 @@ leastGreaterOrEqualExponent f
   | otherwise = expo + 1
   where
     (sign, expo, mant) = decode f
+{-# INLINE leastGreaterOrEqualExponent #-}
 
 -- | Draws a number uniformly from @[0, 2^e]@.
 uniformUpToPowerOfTwo ::
@@ -144,6 +166,7 @@ uniformUpToPowerOfTwo maxExpo (geom, unif) = encode (False, expo + carry, unif)
     carry = if (unif .&. mask mantW) /= 0
       then 0
       else fromIntegral $ (unif .&. carryMask) `unsafeShiftR` mantW
+{-# INLINE uniformUpToPowerOfTwo #-}
 
 -- | Draws a number uniformly from @[0, f]@ via rejection sampling.
 uniformUpTo ::
@@ -167,6 +190,7 @@ uniformUpTo f gen
       if u <= f then return u else uniformUpTo f gen
   where
     (negative, expo, mant) = decode f
+{-# INLINEABLE uniformUpTo #-}
 
 -- | Draws a number uniformly from @[a, b]@ via rejection sampling.
 --
@@ -206,6 +230,7 @@ uniformInRange (a, b) gen
       if a <= u && u <= b
         then return u
         else uniformInRange (a, b) gen
+{-# INLINEABLE uniformInRange #-}
 
 -------------------------------------------------------------------------------
 -- Foreign conversion functions
@@ -213,18 +238,21 @@ uniformInRange (a, b) gen
 
 castWord32ToFloat :: Word32 -> Float
 castWord32ToFloat (W32# w#) = F# (stgWord32ToFloat w#)
+{-# INLINE castWord32ToFloat #-}
 
 foreign import prim "stg_word32ToFloatyg"
     stgWord32ToFloat :: Word# -> Float#
 
 castFloatToWord32 :: Float -> Word32
 castFloatToWord32 (F# f#) = W32# (stgFloatToWord32 f#)
+{-# INLINE castFloatToWord32 #-}
 
-foreign import prim "stg_floatToWord32zh"
+foreign import prim "stg_floatToWord32yg"
     stgFloatToWord32 :: Float# -> Word#
 
 castWord64ToDouble :: Word64 -> Double
 castWord64ToDouble (W64# w) = D# (stgWord64ToDouble w)
+{-# INLINE castWord64ToDouble #-}
 
 foreign import prim "stg_word64ToDoubleyg"
 #if WORD_SIZE_IN_BITS == 64
@@ -235,8 +263,9 @@ foreign import prim "stg_word64ToDoubleyg"
 
 castDoubleToWord64 :: Double -> Word64
 castDoubleToWord64 (D# d) = W64# (stgDoubleToWord64 d)
+{-# INLINE castDoubleToWord64 #-}
 
-foreign import prim "stg_doubleToWord64zh"
+foreign import prim "stg_doubleToWord64yg"
 #if WORD_SIZE_IN_BITS == 64
     stgDoubleToWord64 :: Double# -> Word#
 #else

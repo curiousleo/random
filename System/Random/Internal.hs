@@ -678,6 +678,7 @@ ieeeInUnitIntervalM g = do
     t | t < bernoulliWidth -> return t
     _ -> geometricDistr bernoulliWidth expo g
   return $ uniformUpToPowerOfTwo expo (geom, (fromIntegral unif))
+{-# INLINE ieeeInUnitIntervalM #-}
 
 ieeeInIntervalM :: forall a g s m. (IEEERepr a, MonadRandom g s m) => (a, a) -> g s -> m a
 ieeeInIntervalM (lo, hi) g =
@@ -694,6 +695,7 @@ ieeeInIntervalM (lo, hi) g =
         return (geom, fromIntegral unif)
 
   in uniformInRange (lo, hi) gen
+{-# INLINE ieeeInIntervalM #-}
 
 instance UniformRange Double where
   uniformRM = ieeeInIntervalM

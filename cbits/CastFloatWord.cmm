@@ -29,7 +29,7 @@ stg_word64ToDoubleyg(I64 w)
     return (d);
 }
 
-stg_doubleToWord64zh(D_ d)
+stg_doubleToWord64yg(D_ d)
 {
     I64 w;
     P_ ptr;
@@ -59,7 +59,7 @@ stg_word32ToFloatyg(W_ w)
     return (f);
 }
 
-stg_floatToWord32zh(F_ f)
+stg_floatToWord32yg(F_ f)
 {
     W_ w;
     P_ ptr;
