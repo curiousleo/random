@@ -680,27 +680,20 @@ ieeeInUnitIntervalM g = do
   return $ uniformUpToPowerOfTwo expo (geom, (fromIntegral unif))
 
 ieeeInIntervalM :: forall a g s m. (IEEERepr a, MonadRandom g s m) => (a, a) -> g s -> m a
-ieeeInIntervalM (lo, hi) g = go
-  where
-    p = Proxy :: Proxy a
-    entropyWidth = 64
-    bernoulliWidth = entropyWidth - (mantissaWidth p) - 1 :: Int
-    expo = exponentBias p - 1 -- TODO: 126 fair Bernoulli trials should be enough for everyone?
+ieeeInIntervalM (lo, hi) g =
+  let p = Proxy :: Proxy a
+      entropyWidth = 64
+      bernoulliWidth = entropyWidth - (mantissaWidth p) - 1 :: Int
+      expo = exponentBias p - 1 -- TODO: 126 fair Bernoulli trials should be enough for everyone?
 
-    go = do
-      unif1 <- uniformWord64 g
-      geom1 <- case countLeadingZeros unif1 of
-        t | t < bernoulliWidth -> return t
-        _ -> geometricDistr bernoulliWidth expo g
+      gen = do
+        unif <- uniformWord64 g
+        geom <- case countLeadingZeros unif of
+          t | t < bernoulliWidth -> return t
+          _ -> geometricDistr bernoulliWidth expo g
+        return (geom, fromIntegral unif)
 
-      unif2 <- uniformWord64 g
-      geom2 <- case countLeadingZeros unif2 of
-        t | t < bernoulliWidth -> return t
-        _ -> geometricDistr bernoulliWidth expo g
-
-      case uniformInRange (lo, hi) (geom1, fromIntegral unif1) (geom2, fromIntegral unif2) of
-        Just u -> return u
-        Nothing -> go
+  in uniformInRange (lo, hi) gen
 
 instance UniformRange Double where
   uniformRM = ieeeInIntervalM

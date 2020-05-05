@@ -82,8 +82,16 @@ encodePowerOfTwo :: IEEERepr a => Int -> a
 encodePowerOfTwo expo = encode (False, expo, 0)
 
 -------------------------------------------------------------------------------
--- IEEE generation primitives
+-- IEEE floating point number generation
 -------------------------------------------------------------------------------
+
+data IEEEResult i o
+  = Partial (i -> IEEEResult i o)
+  | Done o
+
+instance Functor (IEEEResult i) where
+  fmap f (Partial k) = Partial (fmap f . k)
+  fmap f (Done r)    = Done (f r)
 
 -- | Returns the least power of two greater than or equal to the positive
 -- argument.
@@ -139,24 +147,24 @@ uniformUpToPowerOfTwo maxExpo (geom, unif) = encode (False, expo + carry, unif)
 
 -- | Draws a number uniformly from @[0, f]@ via rejection sampling.
 uniformUpTo ::
-  IEEERepr a =>
+  (IEEERepr a, Monad m) =>
   -- | @f@, the upper bound (inclusive)
   a ->
   -- | @(x, y)@ such that @x@ is drawn from a geometric distribution with
   -- @p = 0.5@ and @y@ is drawn uniformly from @[0, 2^(exponentWidth + 1))@
-  (Int, Repr a) ->
+  m (Int, Repr a) ->
   -- | sample drawn uniformly from @[0, f]@ or 'Nothing' if the sample was
   -- rejected
-  Maybe a
-uniformUpTo f p
+  m a
+uniformUpTo f gen
   | negative = error "uniformUpTo: negative upper bound"
-  | isInfinite f || isNaN f || f == 0 = Just f
-  | mant == 0 = Just $ uniformUpToPowerOfTwo expo p
-  | otherwise =
+  | isInfinite f || isNaN f || f == 0 = return f
+  | mant == 0 = uniformUpToPowerOfTwo expo <$> gen
+  | otherwise = do
       -- TODO: opportunity for bitmask rejection here?
       -- consider minimal exponent
-      let u = uniformUpToPowerOfTwo (leastGreaterOrEqualExponent f) p
-      in if u <= f then Just u else Nothing
+      u <- uniformUpToPowerOfTwo (leastGreaterOrEqualExponent f) <$> gen
+      if u <= f then return u else uniformUpTo f gen
   where
     (negative, expo, mant) = decode f
 
@@ -165,41 +173,39 @@ uniformUpTo f p
 -- TODO: convert this to CPS so we only consume as much entropy as we actually
 -- need.
 uniformInRange ::
-  forall a.
-  IEEERepr a =>
+  forall m a.
+  (Monad m, IEEERepr a) =>
   -- | lower and upper bounds @(a, b)@ such that @a <= b@
   (a, a) ->
-  -- | @(x, y)@ such that @x@ is drawn from a geometric distribution with
-  -- @p = 0.5@ and @y@ is drawn uniformly from @[0, 2^(exponentWidth + 1))@
-  (Int, Repr a) ->
-  -- | @(x, y)@ such that @x@ is drawn from a geometric distribution with
-  -- @p = 0.5@ and @y@ is drawn uniformly from @[0, 2^(exponentWidth + 1))@
-  (Int, Repr a) ->
+  -- | generates @(x, y)@ such that @x@ is drawn from a geometric distribution
+  -- with @p = 0.5@ and @y@ is drawn uniformly from @[0, 2^(exponentWidth + 1))@
+  m (Int, Repr a) ->
   -- | sample drawn uniformly from @[a, b]@ or 'Nothing' if the sample was
   -- rejected
-  Maybe a
-uniformInRange (a, b) p q
+  m a
+uniformInRange (a, b) gen
   | not (a <= b) = error "uniformInRange: a <= b required"
-  | isNegative b = negate <$> uniformInRange (negate b, negate a) p q
+  | isNegative b = negate <$> uniformInRange (negate b, negate a) gen
   | a < 0 && b > 0 = do
       let expoA' = leastGreaterOrEqualExponent (negate a)
           expoB' = leastGreaterOrEqualExponent b
           a' = encodePowerOfTwo expoA' :: a
           b' = encodePowerOfTwo expoB' :: a
-      d <- uniformUpTo (a' + b') p -- TODO: what if a' or b' are not representable?
+      d <- uniformUpTo (a' + b') gen -- TODO: what if a' or b' are not representable?
+      s <- gen
       let u = if d <= a' -- True with p = x / (x + y)
-                then negate $ uniformUpToPowerOfTwo expoA' q
-                else uniformUpToPowerOfTwo expoB' q
+                then negate $ uniformUpToPowerOfTwo expoA' s
+                else uniformUpToPowerOfTwo expoB' s
       if a <= u && u <= b
-        then Just u
-        else Nothing
+        then return u
+        else uniformInRange (a, b) gen
   | otherwise = do
       let d = b - a -- TODO: round up
-      v <- uniformUpTo d p
+      v <- uniformUpTo d gen
       let u = v + a -- TODO: round to zero
       if a <= u && u <= b
-        then Just u
-        else Nothing
+        then return u
+        else uniformInRange (a, b) gen
 
 -------------------------------------------------------------------------------
 -- Foreign conversion functions
