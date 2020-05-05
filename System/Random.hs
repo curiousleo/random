@@ -231,12 +231,12 @@ instance Random Bool
 instance Random Double where
   randomR r g = runGenState g (uniformRM r)
   {-# INLINE randomR #-}
-  random g = runGenState g doubleInUnitIntervalM
+  random g = runGenState g ieeeInUnitIntervalM
   {-# INLINE random #-}
 instance Random Float where
   randomR r g = runGenState g (uniformRM r)
   {-# INLINE randomR #-}
-  random g = runGenState g floatInUnitIntervalM
+  random g = runGenState g ieeeInUnitIntervalM
   {-# INLINE random #-}
 
 -------------------------------------------------------------------------------

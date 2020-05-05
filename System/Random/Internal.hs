@@ -50,9 +50,7 @@ module System.Random.Internal
   , Uniform(..)
   , UniformRange(..)
   , uniformByteString
-  , floatInUnitIntervalM
   , floatInIntervalM
-  , doubleInUnitIntervalM
 
   -- * Generators for sequences of pseudo-random bytes
   , genShortByteStringIO
@@ -70,6 +68,7 @@ import Data.ByteString.Builder.Prim.Internal (runF)
 import Data.ByteString.Internal (ByteString(PS))
 import Data.ByteString.Short.Internal (ShortByteString(SBS), fromShort)
 import Data.Int
+import Data.Proxy
 import Data.Word
 import Foreign.C.Types
 import Foreign.Marshal.Alloc (alloca)
@@ -82,6 +81,8 @@ import qualified System.Random.SplitMix as SM
 import qualified System.Random.SplitMix32 as SM32
 import GHC.Word
 import GHC.IO (IO(..))
+
+import System.Random.Internal.IEEE
 
 -- | 'RandomGen' is an interface to pure pseudo-random number generators.
 --
@@ -665,47 +666,48 @@ instance UniformRange Bool where
   uniformRM (True, True)   _g = return True
   uniformRM _               g = uniformM g
 
+ieeeInUnitIntervalM :: forall a g s m. (IEEERepr a, MonadRandom g s m) => g s -> m a
+ieeeInUnitIntervalM g = do
+  let p = Proxy :: Proxy a
+      entropyWidth = 64
+      bernoulliWidth = entropyWidth - (mantissaWidth p) - 1 :: Int
+      expo = exponentBias p - 1
+
+  unif <- uniformWord64 g
+  geom <- case countLeadingZeros unif of
+    t | t < bernoulliWidth -> return t
+    _ -> geometricDistr bernoulliWidth expo g
+  return $ uniformUpToPowerOfTwo expo (geom, (fromIntegral unif))
+
+ieeeInIntervalM :: forall a g s m. (IEEERepr a, MonadRandom g s m) => (a, a) -> g s -> m a
+ieeeInIntervalM (lo, hi) g = go
+  where
+    p = Proxy :: Proxy a
+    entropyWidth = 64
+    bernoulliWidth = entropyWidth - (mantissaWidth p) - 1 :: Int
+    (_sign, expo, _mant) = decode (0 :: a)
+
+    go = do
+      unif1 <- uniformWord64 g
+      geom1 <- case countLeadingZeros unif1 of
+        t | t < bernoulliWidth -> return t
+        _ -> geometricDistr bernoulliWidth expo g
+
+      unif2 <- uniformWord64 g
+      geom2 <- case countLeadingZeros unif2 of
+        t | t < bernoulliWidth -> return t
+        _ -> geometricDistr bernoulliWidth expo g
+
+      case uniformInRange (lo, hi) (geom1, fromIntegral unif1) (geom2, fromIntegral unif2) of
+        Just u -> return u
+        Nothing -> go
+
 instance UniformRange Double where
-  uniformRM (l, h) g = do
-    x <- doubleInUnitIntervalM g
-    return $ (h - l) * x + l
+  uniformRM = ieeeInIntervalM
   {-# INLINE uniformRM #-}
 
--- | These are now in 'GHC.Float' but unpatched in some versions so
--- for now we roll our own. See
--- https://gitlab.haskell.org/ghc/ghc/-/blob/6d172e63f3dd3590b0a57371efb8f924f1fcdf05/libraries/base/GHC/Float.hs
-{-# INLINE castWord32ToFloat #-}
-castWord32ToFloat :: Word32 -> Float
-castWord32ToFloat (W32# w#) = F# (stgWord32ToFloat w#)
-
-foreign import prim "stg_word32ToFloatyg"
-    stgWord32ToFloat :: Word# -> Float#
-
-
-{-# INLINE castFloatToWord32 #-}
-castFloatToWord32 :: Float -> Word32
-castFloatToWord32 (F# f#) = W32# (stgFloatToWord32 f#)
-
-foreign import prim "stg_floatToWord32zh"
-    stgFloatToWord32 :: Float# -> Word#
-
-
-{-# INLINE castWord64ToDouble #-}
-castWord64ToDouble :: Word64 -> Double
-castWord64ToDouble (W64# w) = D# (stgWord64ToDouble w)
-
-foreign import prim "stg_word64ToDoubleyg"
-#if WORD_SIZE_IN_BITS == 64
-    stgWord64ToDouble :: Word# -> Double#
-#else
-    stgWord64ToDouble :: Word64# -> Double#
-#endif
-
 instance UniformRange Float where
-  uniformRM (l, h) g = floatInIntervalM g l h
-  --uniformRM (l, h) g = do
-  --  x <- floatInUnitIntervalM g
-  --  return $ (h - l) * x + l
+  uniformRM = ieeeInIntervalM
   {-# INLINE uniformRM #-}
 
 -- | Counts the number of failed Bernoulli trials with p=0.5 before the first
@@ -721,133 +723,6 @@ geometricDistr start limit g = go start
             then return $ acc + countLeadingZeros w
             else go (acc + finiteBitSize w)
 {-# INLINE geometricDistr #-}
-
--- | Generates a 'Word64' representing a floating point number in [0,2^e) using
--- a variant of Downey's method: http://allendowney.com/research/rand/ without carry
-floatingPointInUnitIntervalM :: MonadRandom g s m => Int -> Int -> g s -> m Word64
-floatingPointInUnitIntervalM rawMaxExp mantissaBits g = do
-  let entropyBits = 64 -- bit size of the word generated initially
-  let bernoulliBits = entropyBits - mantissaBits
-  let mantissaMask = (2 ^ mantissaBits) - 1
-
-  w <- uniformWord64 g
-  let m = w .&. mantissaMask
-
-  d <- case countLeadingZeros w of
-    b | b < bernoulliBits -> return b
-    _ -> geometricDistr bernoulliBits rawMaxExp g
-  let e = fromIntegral (rawMaxExp - d)
-
-  return $ (e `unsafeShiftL` mantissaBits) .|. m
-{-# INLINE floatingPointInUnitIntervalM #-}
-
--- | Generates a 'Float' in [0,1).
-floatInUnitIntervalM :: MonadRandom g s m => g s -> m Float
-floatInUnitIntervalM = flip floatInExpIntervalM 0
-{-# INLINE floatInUnitIntervalM #-}
-
--- | Generates a 'Float' in [0,2^e).
-floatInExpIntervalM :: MonadRandom g s m => g s -> Int -> m Float
-floatInExpIntervalM g e = (castWord32ToFloat . fromIntegral) <$> floatingPointInUnitIntervalM (126 + e) 23 g
-{-# INLINE floatInExpIntervalM #-}
-
--- | Finds the next larger power-of-two exponent.
---
--- The smallest possible exponent is -127:
--- >> nextPowerOfTwoExponent 0
--- -127
--- >> :{
--- let twoToMinusThirty = 1 / (fromIntegral $ (2 :: Integer) ^ (30 :: Integer)) :: Float
---     twoToMinusTwenty = 1 / (fromIntegral $ (2 :: Integer) ^ (20 :: Integer)) :: Float
---     e1 = nextPowerOfTwoExponent $ twoToMinusThirty
---     e2 = nextPowerOfTwoExponent $ twoToMinusTwenty
---     e3 = nextPowerOfTwoExponent $ twoToMinusTwenty + twoToMinusThirty
---     e4 = nextPowerOfTwoExponent $ twoToMinusTwenty - twoToMinusThirty
--- in  (e1, e2, e3, e4)
--- (-30, -20, -19, -20)
---
--- For 
--- >> nextPowerOfTwoExponent 1
--- 0
--- >> nextPowerOfTwoExponent 1.1
--- 1
--- >> nextPowerOfTwoExponent $ fromIntegral $ (2 :: Integer) ^ (100 :: Integer)
--- 100
--- >> nextPowerOfTwoExponent $ 1 + (fromIntegral $ (2 :: Integer) ^ (100 :: Integer))
--- 101
--- >> nextPowerOfTwoExponent $ 1 + (fromIntegral $ (2 :: Integer) ^ (100 :: Integer))
--- 101
-nextPowerOfTwoExponent :: Float -> Int
-nextPowerOfTwoExponent f
-  | isInfinite f || isNaN f || m == 0 = e
-  | otherwise = e + 1
-  where
-    mantissaBits = 23
-    exponentBits = 8
-    mantissaMask = (2 ^ mantissaBits) - 1
-    exponentMask = (2 ^ exponentBits) - 1
-
-    w = castFloatToWord32 f
-    m = w .&. mantissaMask
-    e = (fromIntegral $ (w `unsafeShiftR` mantissaBits) .&. exponentMask) - 127
-
-encodeExponent :: Int -> Float
-encodeExponent e = castWord32ToFloat $ (fromIntegral (e + 127)) `unsafeShiftL` mantissaBits
-  where mantissaBits = 23
-
-nextPowerOfTwo :: Float -> Float
-nextPowerOfTwo = encodeExponent . nextPowerOfTwoExponent
-
-floatInIntervalFromZero :: MonadRandom g s m => g s -> Float -> m Float
-floatInIntervalFromZero g b
-  | b < 0 = error "only works for positive floats"
-  | b == 0 = return 0
-  | otherwise = do
-      x <- floatInUnitIntervalM g
-      let u = x * nextPowerOfTwo b
-      if u <= b then return u else floatInIntervalFromZero g b
-
--- PRECONDITIONS:
--- a <= b
--- 0 <= b
---floatInIntervalM' :: MonadRandom g s m => g s -> Float -> Float -> m Float
---floatInIntervalM' g a b
-
--- TODO: a = 0, b = -0
--- TODO: what about inf?
-floatInIntervalM :: MonadRandom g s m => g s -> Float -> Float -> m Float
-floatInIntervalM g a b
-  | a > b = floatInIntervalM g b a
-  -- INVARIANT: a <= b
-  | b < 0 || isNegativeZero b = negate <$> (floatInIntervalM g (-b) (-a)) -- guard can't be 'b <= 0' since that would lead to infinite loop
-  -- INVARIANT: a <= b && 0 <= b && !isNegativeZero b
-  | a == negate b = do -- TODO: take special care with -0!; right now this case is just an optimisation.
-      s <- uniformM g
-      u <- floatInIntervalFromZero g b
-      return $ if s then u else -u
-  | a < 0 && 0 /= b = do
-      -- INVARIANT: a < b && 0 < b
-      let xExp = nextPowerOfTwoExponent a
-          yExp = nextPowerOfTwoExponent b
-          x = encodeExponent xExp
-          y = encodeExponent yExp
-      d <- floatInIntervalFromZero g (x + y)
-      u <- if d <= x -- True with p = x / (x + y)
-             then negate <$> floatInExpIntervalM g xExp
-             else floatInExpIntervalM g yExp
-      if a <= u && u <= b then return u else floatInIntervalM g a b
-  -- INVARIANT: a <= b && 0 <= b && !isNegativeZero b && (0 <= a || b == 0)
-  -- INVARIANT: 0 <= a <= b || a <= b = 0
-  | otherwise = do
-      let d = b - a -- TODO: upward rounding!
-      v <- floatInIntervalFromZero g d
-      let u = v + a -- TODO: round towards zero
-      if a <= u && u <= b then return u else floatInIntervalM g a b
-
--- | Generates a 'Double' in [0,1].
-doubleInUnitIntervalM :: MonadRandom g s m => g s -> m Double
-doubleInUnitIntervalM g = castWord64ToDouble <$> floatingPointInUnitIntervalM 1022 52 g
-{-# INLINE doubleInUnitIntervalM #-}
 
 -- The two integer functions below take an [inclusive,inclusive] range.
 randomIvalIntegral :: (RandomGen g, Integral a) => (a, a) -> g -> (a, g)
