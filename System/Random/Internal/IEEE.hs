@@ -148,12 +148,12 @@ uniformUpTo ::
   -- | sample drawn uniformly from @[0, f]@ or 'Nothing' if the sample was
   -- rejected
   Maybe a
-uniformUpTo f (geom, unif)
+uniformUpTo f p
   | negative = error "uniformUpTo: negative upper bound"
   | isInfinite f || isNaN f || f == 0 = Just f
-  | mant == 0 = Just $ uniformUpToPowerOfTwo expo (geom, unif)
+  | mant == 0 = Just $ uniformUpToPowerOfTwo expo p
   | otherwise =
-      let u = uniformUpToPowerOfTwo (leastGreaterOrEqualExponent f) (geom, unif)
+      let u = uniformUpToPowerOfTwo (leastGreaterOrEqualExponent f) p
       in if u <= f then Just u else Nothing
   where
     (negative, expo, mant) = decode f

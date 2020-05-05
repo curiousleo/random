@@ -685,7 +685,7 @@ ieeeInIntervalM (lo, hi) g = go
     p = Proxy :: Proxy a
     entropyWidth = 64
     bernoulliWidth = entropyWidth - (mantissaWidth p) - 1 :: Int
-    (_sign, expo, _mant) = decode (0 :: a)
+    expo = exponentBias p - 1 -- TODO: 126 fair Bernoulli trials should be enough for everyone?
 
     go = do
       unif1 <- uniformWord64 g
