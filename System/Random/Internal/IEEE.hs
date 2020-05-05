@@ -153,6 +153,8 @@ uniformUpTo f p
   | isInfinite f || isNaN f || f == 0 = Just f
   | mant == 0 = Just $ uniformUpToPowerOfTwo expo p
   | otherwise =
+      -- TODO: opportunity for bitmask rejection here?
+      -- consider minimal exponent
       let u = uniformUpToPowerOfTwo (leastGreaterOrEqualExponent f) p
       in if u <= f then Just u else Nothing
   where
@@ -180,11 +182,11 @@ uniformInRange (a, b) p q
   | not (a <= b) = error "uniformInRange: a <= b required"
   | isNegative b = negate <$> uniformInRange (negate b, negate a) p q
   | a < 0 && b > 0 = do
-      let expoA' = leastGreaterOrEqualExponent a
+      let expoA' = leastGreaterOrEqualExponent (negate a)
           expoB' = leastGreaterOrEqualExponent b
           a' = encodePowerOfTwo expoA' :: a
           b' = encodePowerOfTwo expoB' :: a
-      d <- uniformUpTo (a' + b') p
+      d <- uniformUpTo (a' + b') p -- TODO: what if a' or b' are not representable?
       let u = if d <= a' -- True with p = x / (x + y)
                 then negate $ uniformUpToPowerOfTwo expoA' q
                 else uniformUpToPowerOfTwo expoB' q
