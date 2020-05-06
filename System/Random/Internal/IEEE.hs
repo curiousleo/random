@@ -98,21 +98,9 @@ isNegative :: IEEERepr a => a -> Bool
 isNegative f = let (sign, _expo, _mant) = decode f in sign
 {-# INLINE isNegative #-}
 
-encodePowerOfTwo :: IEEERepr a => Int -> a
-encodePowerOfTwo expo = encode (False, expo, 0)
-{-# INLINE encodePowerOfTwo #-}
-
 -------------------------------------------------------------------------------
 -- IEEE floating point number generation
 -------------------------------------------------------------------------------
-
-data IEEEResult i o
-  = Partial (i -> IEEEResult i o)
-  | Done o
-
-instance Functor (IEEEResult i) where
-  fmap f (Partial k) = Partial (fmap f . k)
-  fmap f (Done r)    = Done (f r)
 
 -- | Returns the least power of two greater than or equal to the positive
 -- argument.
@@ -183,14 +171,16 @@ uniformUpTo f gen
   | negative = error "uniformUpTo: negative upper bound"
   | isInfinite f || isNaN f || f == 0 = return f
   | mant == 0 = uniformUpToPowerOfTwo expo <$> gen
-  | otherwise = do
+  | otherwise =
       -- TODO: opportunity for bitmask rejection here?
       -- consider minimal exponent
-      u <- uniformUpToPowerOfTwo (leastGreaterOrEqualExponent f) <$> gen
-      if u <= f then return u else uniformUpTo f gen
+      let go = do
+            u <- uniformUpToPowerOfTwo (leastGreaterOrEqualExponent f) <$> gen
+            if u <= f then return u else go
+      in go
   where
     (negative, expo, mant) = decode f
-{-# INLINEABLE uniformUpTo #-}
+{-# INLINE uniformUpTo #-}
 
 -- | Draws a number uniformly from @[a, b]@ via rejection sampling.
 uniformInRange ::
@@ -207,41 +197,28 @@ uniformInRange ::
 uniformInRange (a, b) gen
   | not (a <= b) = error "uniformInRange: a <= b required"
   | isNegative b = negate <$> uniformInRange (negate b, negate a) gen
-  | a < 0 && b > 0 = do
-      let expoA' = leastGreaterOrEqualExponent (negate a)
-          expoB' = leastGreaterOrEqualExponent b
-          a' = encodePowerOfTwo expoA' :: a
-          b' = encodePowerOfTwo expoB' :: a
-      d <- uniformUpTo (a' + b') gen -- TODO: what if a' or b' are not representable?
-      s <- gen
-      let u = if d <= a' -- True with p = x / (x + y)
-                then negate $ uniformUpToPowerOfTwo expoA' s
-                else uniformUpToPowerOfTwo expoB' s
-      if a <= u && u <= b
-        then return u
-        else uniformInRange (a, b) gen
-  | otherwise = do
+  | a < 0 && b > 0 =
+      let mantW = mantissaWidth (Proxy :: Proxy a)
+          carryMask = 2^mantW
+          go = do
+            d <- uniformUpTo (max (abs a) b) gen
+            (_geom, unif) <- gen -- TODO: we're wasting a lot of entropy here!
+            let neg = unif .&. carryMask /= 0
+                u = if neg then negate d else d
+            if a <= u && u <= b
+              then return u
+              else go
+      in go
+  | otherwise =
       let d = b - a -- TODO: round up
-      v <- uniformUpTo d gen
-      let u = v + a -- TODO: round to zero
-      if a <= u && u <= b
-        then return u
-        else uniformInRange (a, b) gen
-{-# INLINEABLE uniformInRange #-}
-
--- | proportional (a, b) == True with p = 2^a / (2^a + 2^b)
--- TODO: better use some sort of symbolic addition to decide?
-{-
-proportional ::
-  (Monad m, IEEERepr a) =>
-  (Int, Int) ->
-  m (Int, Repr a) ->
-  m Bool
-proportional (a, b) gen =
-  let d = abs $ b - a
-  u <- uniformUpTo (1 + encode (False, d, 0)) gen
-  return $ u <= 1 && 
--}
+          go = do
+            v <- uniformUpTo d gen
+            let u = v + a -- TODO: round to zero
+            if a <= u && u <= b
+              then return u
+              else go
+      in go
+{-# INLINE uniformInRange #-}
 
 -------------------------------------------------------------------------------
 -- Foreign conversion functions

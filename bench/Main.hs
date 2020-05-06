@@ -171,8 +171,8 @@ main = do
           , pureUniformRIncludeHalfBench @CUIntMax sz
           ]
         , bgroup "unbounded"
-          [ pureUniformRBench @Float (1.23e-4, 5.67e8) sz
-          , pureUniformRBench @Double (1.23e-4, 5.67e8) sz
+          [ pureUniformRBench @Float (-1.23e-4, 5.67e8) sz
+          , pureUniformRBench @Double (-1.23e-4, 5.67e8) sz
           , let !i = (10 :: Integer) ^ (100 :: Integer)
                 !range = (-i - 1, i + 1)
             in pureUniformRBench @Integer range sz
