@@ -193,9 +193,6 @@ uniformUpTo f gen
 {-# INLINEABLE uniformUpTo #-}
 
 -- | Draws a number uniformly from @[a, b]@ via rejection sampling.
---
--- TODO: convert this to CPS so we only consume as much entropy as we actually
--- need.
 uniformInRange ::
   forall m a.
   (Monad m, IEEERepr a) =>
@@ -231,6 +228,20 @@ uniformInRange (a, b) gen
         then return u
         else uniformInRange (a, b) gen
 {-# INLINEABLE uniformInRange #-}
+
+-- | proportional (a, b) == True with p = 2^a / (2^a + 2^b)
+-- TODO: better use some sort of symbolic addition to decide?
+{-
+proportional ::
+  (Monad m, IEEERepr a) =>
+  (Int, Int) ->
+  m (Int, Repr a) ->
+  m Bool
+proportional (a, b) gen =
+  let d = abs $ b - a
+  u <- uniformUpTo (1 + encode (False, d, 0)) gen
+  return $ u <= 1 && 
+-}
 
 -------------------------------------------------------------------------------
 -- Foreign conversion functions
